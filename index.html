@@ -601,8 +601,18 @@
           // Check if user is already signed in
           auth.onAuthStateChanged((user) => {
             if (user) {
-              document.querySelector('.container').style.display = 'block';
-              loadInitialData();
+              // Show the container first
+              const container = document.querySelector('.container');
+              container.style.display = 'block';
+              // Hide the splash screen
+              const splashScreen = document.getElementById('splash-screen');
+              if (splashScreen) {
+                splashScreen.style.display = 'none';
+              }
+              // Initialize all components
+              $(document).ready(() => {
+                loadInitialData();
+              });
             } else {
               // Show login form
               showLoginForm();
@@ -641,9 +651,8 @@
       
       try {
         await auth.signInWithEmailAndPassword(email, password);
-        // No need to reload the page, the auth state change will trigger the UI update
-        document.querySelector('.container').style.display = 'block';
-        loadInitialData();
+        // Reload the page to ensure proper initialization
+        location.reload();
       } catch (error) {
         console.error('Login error:', error);
         alert('שגיאה בהתחברות: ' + error.message);
@@ -653,11 +662,18 @@
     }
 
     function loadInitialData() {
-      // Load all initial data
-      loadFlowerTypes();
-      generateReport();
-      updateExpensesList();
-      initializeOrderAutocomplete();
+      try {
+        // Load all initial data
+        loadFlowerTypes();
+        updateExpensesList();
+        initializeOrderAutocomplete();
+        // Generate report last, when all other data is loaded
+        setTimeout(() => {
+          generateReport();
+        }, 1000);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+      }
     }
 
     // Firebase data operations
