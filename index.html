@@ -843,6 +843,129 @@
       total: 0
     };
 
+    // Add the missing addIngredient function
+    let currentIngredients = [];
+
+    function addIngredient() {
+      const flowerName = document.getElementById('flowerInput').value.trim();
+      const quantity = parseInt(document.getElementById('flowerQty').value);
+
+      if (!flowerName || isNaN(quantity) || quantity <= 0) {
+        alert('נא להזין שם פרח וכמות תקינה');
+        return;
+      }
+
+      // Show loading state
+      const addButton = document.querySelector('button[onclick="addIngredient()"]');
+      const originalText = addButton.innerHTML;
+      addButton.innerHTML = 'מוסיף...';
+      addButton.disabled = true;
+
+      db.ref(`${PATHS.FLOWERS}/${flowerName}`).once('value', (snapshot) => {
+        if (!snapshot.exists()) {
+          alert('פרח זה לא קיים במערכת');
+          addButton.innerHTML = originalText;
+          addButton.disabled = false;
+          return;
+        }
+
+        const price = snapshot.val();
+        currentIngredients.push({
+          name: flowerName,
+          qty: quantity,
+          price: price
+        });
+
+        updateIngredientsList();
+        
+        // Clear inputs
+        document.getElementById('flowerInput').value = '';
+        document.getElementById('flowerQty').value = '';
+        addButton.innerHTML = originalText;
+        addButton.disabled = false;
+      }).catch(error => {
+        console.error('Error adding ingredient:', error);
+        alert('שגיאה בהוספת הפרח: ' + error.message);
+        addButton.innerHTML = originalText;
+        addButton.disabled = false;
+      });
+    }
+
+    function updateIngredientsList() {
+      const list = document.getElementById('ingredientsList');
+      list.innerHTML = '';
+      
+      let totalCost = 0;
+      currentIngredients.forEach((ingredient, index) => {
+        const cost = ingredient.qty * ingredient.price;
+        totalCost += cost;
+        
+        const li = document.createElement('li');
+        li.innerHTML = `
+          ${ingredient.name} - ${ingredient.qty} יחידות (${cost} ₪)
+          <button onclick="removeIngredient(${index})" style="margin-right: 10px;">
+            <i class="fas fa-trash"></i>
+          </button>
+        `;
+        list.appendChild(li);
+      });
+    }
+
+    function removeIngredient(index) {
+      currentIngredients.splice(index, 1);
+      updateIngredientsList();
+    }
+
+    function submitItem() {
+      const name = document.getElementById('itemName').value.trim();
+      const price = parseFloat(document.getElementById('itemPrice').value);
+
+      if (!name || isNaN(price) || price <= 0) {
+        alert('נא למלא שם מוצר ומחיר תקין');
+        return;
+      }
+
+      if (currentIngredients.length === 0) {
+        alert('נא להוסיף לפחות פרח אחד למוצר');
+        return;
+      }
+
+      // Show loading state
+      const submitButton = document.querySelector('button[onclick="submitItem()"]');
+      const originalText = submitButton.innerHTML;
+      submitButton.innerHTML = 'שומר...';
+      submitButton.disabled = true;
+
+      const totalCost = currentIngredients.reduce((sum, ing) => sum + (ing.qty * ing.price), 0);
+      
+      const newItem = {
+        name,
+        price,
+        ingredients: currentIngredients,
+        totalCost,
+        createdBy: auth.currentUser.email,
+        createdAt: new Date().toISOString()
+      };
+
+      db.ref(PATHS.ITEMS).push(newItem)
+        .then(() => {
+          // Reset form
+          document.getElementById('itemName').value = '';
+          document.getElementById('itemPrice').value = '';
+          currentIngredients = [];
+          updateIngredientsList();
+          alert('הפריט נשמר בהצלחה!');
+        })
+        .catch((error) => {
+          console.error('Error submitting item:', error);
+          alert('שגיאה בשמירת הפריט: ' + error.message);
+        })
+        .finally(() => {
+          submitButton.innerHTML = originalText;
+          submitButton.disabled = false;
+        });
+    }
+
     function switchTab(tabId) {
       document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
