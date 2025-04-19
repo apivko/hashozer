@@ -32,6 +32,17 @@
     const db = firebase.database();
     const auth = firebase.auth();
 
+    // Add error logging for database connection
+    db.ref('.info/connected').on('value', function(snap) {
+      if (snap.val() === true) {
+        console.log('Connected to Firebase Database');
+      } else {
+        console.log('Disconnected from Firebase Database');
+      }
+    }, function(error) {
+      console.error('Firebase connection error:', error);
+    });
+
     // Firebase paths
     const PATHS = {
       ITEMS: 'flower_items',
@@ -970,8 +981,11 @@
         createdBy: auth.currentUser.email
       };
 
+      console.log('Attempting to save order:', newOrder);
+
       db.ref(PATHS.ORDERS).push(newOrder)
         .then(() => {
+          console.log('Order saved successfully');
           // Reset form
           document.getElementById('customerName').value = '';
           document.getElementById('customerPhone').value = '';
