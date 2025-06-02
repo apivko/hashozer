@@ -48,7 +48,8 @@
       ITEMS: 'flower_items',
       FLOWERS: 'flower_types',
       EXPENSES: 'expenses',
-      ORDERS: 'orders'
+      ORDERS: 'orders',
+      CUSTOMERS: 'customers'
     };
 
     // Default flowers for initialization
@@ -58,6 +59,120 @@
       "נוריות": 7,
       "גרברות": 12
     };
+
+    // Initialize customer autocomplete
+    function initializeCustomerAutocomplete() {
+      $("#customerName").autocomplete({
+        source: function(request, response) {
+          db.ref(PATHS.CUSTOMERS)
+            .orderByChild('name')
+            .startAt(request.term)
+            .endAt(request.term + '\uf8ff')
+            .once('value')
+            .then((snapshot) => {
+              const customers = [];
+              snapshot.forEach((child) => {
+                const customer = child.val();
+                customers.push({
+                  label: customer.name,
+                  value: customer.name,
+                  customer: customer
+                });
+              });
+              response(customers);
+            });
+        },
+        minLength: 2,
+        select: function(event, ui) {
+          const customer = ui.item.customer;
+          document.getElementById('customerPhone').value = customer.phone || '';
+          document.getElementById('customerAddress').value = customer.address || '';
+          return false;
+        }
+      });
+    }
+
+    // Modify submitOrder to save customer details
+    function submitOrder() {
+      const name = document.getElementById('customerName').value.trim();
+      const phone = document.getElementById('customerPhone').value.trim();
+      const address = document.getElementById('customerAddress').value.trim();
+      const deliveryDate = document.getElementById('deliveryDate').value;
+
+      if (!name || !phone || !address || !deliveryDate || currentOrder.items.length === 0) {
+        alert('נא למלא את כל פרטי ההזמנה');
+        return;
+      }
+
+      // Show loading state
+      const submitButton = document.querySelector('button[onclick="submitOrder()"]');
+      const originalText = submitButton.innerHTML;
+      submitButton.innerHTML = 'שומר...';
+      submitButton.disabled = true;
+
+      // Save or update customer details
+      const customerKey = name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const customerData = {
+        name,
+        phone,
+        address,
+        lastOrderDate: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Create the order object
+      const newOrder = {
+        ...currentOrder,
+        customer: customerData,
+        deliveryDate,
+        orderDate: new Date().toISOString(),
+        status: 'new',
+        createdBy: auth.currentUser.email
+      };
+
+      // Save both customer and order
+      Promise.all([
+        db.ref(`${PATHS.CUSTOMERS}/${customerKey}`).set(customerData),
+        db.ref(PATHS.ORDERS).push(newOrder)
+      ])
+        .then(() => {
+          console.log('Order and customer saved successfully');
+          // Reset form
+          document.getElementById('customerName').value = '';
+          document.getElementById('customerPhone').value = '';
+          document.getElementById('customerAddress').value = '';
+          document.getElementById('deliveryDate').value = '';
+          currentOrder = { items: [], total: 0 };
+          updateOrderItemsList();
+          
+          alert('ההזמנה נשמרה בהצלחה!');
+        })
+        .catch((error) => {
+          console.error('Error submitting order:', error);
+          alert('שגיאה בשמירת ההזמנה: ' + error.message);
+        })
+        .finally(() => {
+          submitButton.innerHTML = originalText;
+          submitButton.disabled = false;
+        });
+    }
+
+    // Add customer autocomplete initialization to loadInitialData
+    function loadInitialData() {
+      try {
+        // Load all initial data
+        loadFlowerTypes();
+        updateExpensesList();
+        initializeOrderAutocomplete();
+        initializeCustomerAutocomplete();
+        // Generate report last, when all other data is loaded
+        setTimeout(() => {
+          generateReport();
+        }, 1000);
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+      }
+    }
   </script>
   <style>
     /* Splash Screen Styles */
@@ -760,6 +875,7 @@
         loadFlowerTypes();
         updateExpensesList();
         initializeOrderAutocomplete();
+        initializeCustomerAutocomplete();
         // Generate report last, when all other data is loaded
         setTimeout(() => {
           generateReport();
@@ -825,749 +941,4 @@
     }
 
     function deleteFlowerType(type) {
-      if (confirm(`האם למחוק את הפרח "${type}"?`)) {
-        // Show loading state
-        const deleteButton = event.target;
-        const originalText = deleteButton.innerHTML;
-        deleteButton.innerHTML = 'מוחק...';
-        deleteButton.disabled = true;
-
-        db.ref(`${PATHS.FLOWERS}/${type}`).remove()
-          .then(() => {
-            updateFlowerTypeList();
-            initializeAutocomplete();
-            alert('הפרח נמחק בהצלחה!');
-          })
-          .catch((error) => {
-            console.error('Error deleting flower:', error);
-            alert('שגיאה במחיקת הפרח: ' + error.message);
-            deleteButton.innerHTML = originalText;
-            deleteButton.disabled = false;
-          });
-      }
-    }
-
-    function updateFlowerTypeList() {
-      const list = document.getElementById('flowerTypeList').getElementsByTagName('tbody')[0];
-      
-      // Show loading state
-      list.innerHTML = '<tr><td colspan="3" style="text-align: center;">טוען...</td></tr>';
-      
-      db.ref(PATHS.FLOWERS).once('value', (snapshot) => {
-        const flowers = snapshot.val() || {};
-        
-        list.innerHTML = '';
-        Object.entries(flowers).forEach(([name, price]) => {
-          const row = document.createElement('tr');
-          row.innerHTML = `
-            <td>${name}</td>
-            <td>${price} ₪</td>
-            <td><button onclick="deleteFlowerType('${name}')">מחק</button></td>
-          `;
-          list.appendChild(row);
-        });
-
-        if (Object.keys(flowers).length === 0) {
-          list.innerHTML = '<tr><td colspan="3" style="text-align: center;">אין פרחים במערכת</td></tr>';
-        }
-      }).catch(error => {
-        console.error('Error loading flowers:', error);
-        list.innerHTML = '<tr><td colspan="3" style="text-align: center; color: red;">שגיאה בטעינת הפרחים</td></tr>';
-      });
-    }
-
-    function initializeAutocomplete() {
-      const flowerInput = $("#flowerInput");
-      
-      db.ref(PATHS.FLOWERS).once('value', (snapshot) => {
-        const flowers = snapshot.val() || {};
-        
-        flowerInput.autocomplete({
-          source: Object.keys(flowers),
-          minLength: 0,
-          select: function(event, ui) {
-            flowerInput.val(ui.item.value);
-            return false;
-          }
-        }).focus(function() {
-          $(this).autocomplete("search", "");
-        });
-      });
-    }
-
-    document.getElementById('settingsButton').onclick = function() {
-      document.getElementById('settingsModal').style.display = 'block';
-      updateFlowerTypeList();
-    };
-
-    document.querySelector('.close').onclick = function() {
-      document.getElementById('settingsModal').style.display = 'none';
-    };
-
-    window.onclick = function(event) {
-      if (event.target == document.getElementById('settingsModal')) {
-        document.getElementById('settingsModal').style.display = 'none';
-      }
-    };
-
-    $(function() {
-      initializeAutocomplete();
-      updateFlowerTypeList();
-    });
-
-    loadFlowerTypes();
-    autoResetItems();
-    generateReport();
-
-    // New code for orders
-    let currentOrder = {
-      items: [],
-      total: 0
-    };
-
-    // Add the missing addIngredient function
-    let currentIngredients = [];
-
-    function addIngredient() {
-      const flowerName = document.getElementById('flowerInput').value.trim();
-      const quantity = parseInt(document.getElementById('flowerQty').value);
-
-      if (!flowerName || isNaN(quantity) || quantity <= 0) {
-        alert('נא להזין שם פרח וכמות תקינה');
-        return;
-      }
-
-      // Show loading state
-      const addButton = document.querySelector('button[onclick="addIngredient()"]');
-      const originalText = addButton.innerHTML;
-      addButton.innerHTML = 'מוסיף...';
-      addButton.disabled = true;
-
-      db.ref(`${PATHS.FLOWERS}/${flowerName}`).once('value', (snapshot) => {
-        if (!snapshot.exists()) {
-          alert('פרח זה לא קיים במערכת');
-          addButton.innerHTML = originalText;
-          addButton.disabled = false;
-          return;
-        }
-
-        const price = snapshot.val();
-        currentIngredients.push({
-          name: flowerName,
-          qty: quantity,
-          price: price
-        });
-
-        updateIngredientsList();
-        
-        // Clear inputs
-        document.getElementById('flowerInput').value = '';
-        document.getElementById('flowerQty').value = '';
-        addButton.innerHTML = originalText;
-        addButton.disabled = false;
-      }).catch(error => {
-        console.error('Error adding ingredient:', error);
-        alert('שגיאה בהוספת הפרח: ' + error.message);
-        addButton.innerHTML = originalText;
-        addButton.disabled = false;
-      });
-    }
-
-    function updateIngredientsList() {
-      const list = document.getElementById('ingredientsList');
-      list.innerHTML = '';
-      
-      let totalCost = 0;
-      currentIngredients.forEach((ingredient, index) => {
-        const cost = ingredient.qty * ingredient.price;
-        totalCost += cost;
-        
-        const li = document.createElement('li');
-        li.innerHTML = `
-          <span>${ingredient.name} - ${ingredient.qty} יחידות (${cost} ₪)</span>
-          <button onclick="removeIngredient(${index})" title="מחק פרח">
-            <i class="fas fa-trash"></i>
-          </button>
-        `;
-        list.appendChild(li);
-      });
-    }
-
-    function removeIngredient(index) {
-      currentIngredients.splice(index, 1);
-      updateIngredientsList();
-    }
-
-    function submitItem() {
-      const name = document.getElementById('itemName').value.trim();
-      const price = parseFloat(document.getElementById('itemPrice').value);
-
-      if (!name || isNaN(price) || price <= 0) {
-        alert('נא למלא שם מוצר ומחיר תקין');
-        return;
-      }
-
-      if (currentIngredients.length === 0) {
-        alert('נא להוסיף לפחות פרח אחד למוצר');
-        return;
-      }
-
-      // Show loading state
-      const submitButton = document.querySelector('button[onclick="submitItem()"]');
-      const originalText = submitButton.innerHTML;
-      submitButton.innerHTML = 'שומר...';
-      submitButton.disabled = true;
-
-      const totalCost = currentIngredients.reduce((sum, ing) => sum + (ing.qty * ing.price), 0);
-      
-      const newItem = {
-        name,
-        price,
-        ingredients: currentIngredients,
-        totalCost,
-        createdBy: auth.currentUser.email,
-        createdAt: new Date().toISOString()
-      };
-
-      db.ref(PATHS.ITEMS).push(newItem)
-        .then(() => {
-          // Reset form
-          document.getElementById('itemName').value = '';
-          document.getElementById('itemPrice').value = '';
-          currentIngredients = [];
-          updateIngredientsList();
-          alert('הפריט נשמר בהצלחה!');
-        })
-        .catch((error) => {
-          console.error('Error submitting item:', error);
-          alert('שגיאה בשמירת הפריט: ' + error.message);
-        })
-        .finally(() => {
-          submitButton.innerHTML = originalText;
-          submitButton.disabled = false;
-        });
-    }
-
-    function switchTab(tabId) {
-      document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-      });
-      document.querySelectorAll('.tab').forEach(tab => {
-        tab.classList.remove('active');
-      });
-      
-      document.getElementById(tabId).classList.add('active');
-      document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-
-      // Refresh data when switching to specific tabs
-      if (tabId === 'reports') {
-        generateReport();
-      } else if (tabId === 'expenses') {
-        updateExpensesList();
-      }
-    }
-
-    function addItemToOrder() {
-      const itemName = document.getElementById('orderItemInput').value.trim();
-      
-      // Show loading state
-      const addButton = document.querySelector('button[onclick="addItemToOrder()"]');
-      const originalText = addButton.innerHTML;
-      addButton.innerHTML = 'מוסיף...';
-      addButton.disabled = true;
-      
-      db.ref(PATHS.ITEMS).once('value', (snapshot) => {
-        const items = [];
-        snapshot.forEach(child => {
-          items.push(child.val());
-        });
-        
-        const item = items.find(i => i.name === itemName);
-        
-        if (!item) {
-          alert('נא לבחור פריט מהרשימה');
-          addButton.innerHTML = originalText;
-          addButton.disabled = false;
-          return;
-        }
-
-        currentOrder.items.push({
-          ...item,
-          discount: 0,
-          finalPrice: item.price
-        });
-
-        updateOrderItemsList();
-        document.getElementById('orderItemInput').value = '';
-        addButton.innerHTML = originalText;
-        addButton.disabled = false;
-      }).catch(error => {
-        console.error('Error adding item to order:', error);
-        alert('שגיאה בהוספת הפריט: ' + error.message);
-        addButton.innerHTML = originalText;
-        addButton.disabled = false;
-      });
-    }
-
-    function updateOrderItemsList() {
-      const list = document.getElementById('orderItemsList');
-      list.innerHTML = '';
-      
-      currentOrder.total = 0;
-      
-      currentOrder.items.forEach((item, index) => {
-        const div = document.createElement('div');
-        div.className = 'order-item';
-        div.innerHTML = `
-          <div>${item.name}</div>
-          <div>${item.price} ₪</div>
-          <div>
-            <input type="number" 
-              class="discount-input" 
-              value="${item.discount}" 
-              min="0" 
-              max="100" 
-              onchange="updateDiscount(${index}, this.value)" 
-              placeholder="הנחה %" />
-          </div>
-          <div>מחיר סופי: ${item.finalPrice} ₪</div>
-          <div class="order-item-actions">
-            <button onclick="removeOrderItem(${index})">
-              <i class="fas fa-trash"></i>
-            </button>
-          </div>
-        `;
-        list.appendChild(div);
-        currentOrder.total += item.finalPrice;
-      });
-
-      document.getElementById('orderSummary').innerHTML = `סה"כ: ${currentOrder.total} ₪`;
-    }
-
-    function updateDiscount(index, discount) {
-      discount = parseFloat(discount) || 0;
-      if (discount < 0) discount = 0;
-      if (discount > 100) discount = 100;
-
-      const item = currentOrder.items[index];
-      item.discount = discount;
-      item.finalPrice = item.price * (1 - discount / 100);
-      updateOrderItemsList();
-    }
-
-    function removeOrderItem(index) {
-      currentOrder.items.splice(index, 1);
-      updateOrderItemsList();
-    }
-
-    function submitOrder() {
-      const name = document.getElementById('customerName').value.trim();
-      const phone = document.getElementById('customerPhone').value.trim();
-      const address = document.getElementById('customerAddress').value.trim();
-      const deliveryDate = document.getElementById('deliveryDate').value;
-
-      if (!name || !phone || !address || !deliveryDate || currentOrder.items.length === 0) {
-        alert('נא למלא את כל פרטי ההזמנה');
-        return;
-      }
-
-      // Show loading state
-      const submitButton = document.querySelector('button[onclick="submitOrder()"]');
-      const originalText = submitButton.innerHTML;
-      submitButton.innerHTML = 'שומר...';
-      submitButton.disabled = true;
-
-      const newOrder = {
-        ...currentOrder,
-        customer: { name, phone, address },
-        deliveryDate,
-        orderDate: new Date().toISOString(),
-        status: 'new',
-        createdBy: auth.currentUser.email
-      };
-
-      console.log('Attempting to save order:', newOrder);
-
-      db.ref(PATHS.ORDERS).push(newOrder)
-        .then(() => {
-          console.log('Order saved successfully');
-          // Reset form
-          document.getElementById('customerName').value = '';
-          document.getElementById('customerPhone').value = '';
-          document.getElementById('customerAddress').value = '';
-          document.getElementById('deliveryDate').value = '';
-          currentOrder = { items: [], total: 0 };
-          updateOrderItemsList();
-          
-          alert('ההזמנה נשמרה בהצלחה!');
-        })
-        .catch((error) => {
-          console.error('Error submitting order:', error);
-          alert('שגיאה בשמירת ההזמנה: ' + error.message);
-        })
-        .finally(() => {
-          submitButton.innerHTML = originalText;
-          submitButton.disabled = false;
-        });
-    }
-
-    // Initialize tabs
-    document.querySelectorAll('.tab').forEach(tab => {
-      tab.addEventListener('click', () => {
-        switchTab(tab.dataset.tab);
-      });
-    });
-
-    // Initialize order item autocomplete
-    function initializeOrderAutocomplete() {
-      db.ref(PATHS.ITEMS).once('value', (snapshot) => {
-        const items = [];
-        snapshot.forEach(child => {
-          items.push(child.val());
-        });
-
-        $("#orderItemInput").autocomplete({
-          source: items.map(i => i.name),
-          minLength: 0,
-          select: function(event, ui) {
-            $(this).val(ui.item.value);
-            return false;
-          }
-        }).focus(function() {
-          $(this).autocomplete("search", "");
-        });
-      });
-    }
-
-    // Initialize everything when the page loads
-    $(function() {
-      setupRealtimeListeners();
-      autoResetItems(); // Call it on load
-    });
-
-    // New functions for expenses
-    function submitExpense() {
-      const name = document.getElementById('expenseName').value.trim();
-      const amount = parseFloat(document.getElementById('expenseAmount').value);
-
-      if (!name || !amount || amount <= 0) {
-        alert('נא למלא שם הוצאה וסכום תקין');
-        return;
-      }
-
-      // Show loading state
-      const submitButton = document.querySelector('button[onclick="submitExpense()"]');
-      const originalText = submitButton.innerHTML;
-      submitButton.innerHTML = 'שומר...';
-      submitButton.disabled = true;
-
-      const newExpense = {
-        name,
-        amount,
-        date: new Date().toISOString(),
-        createdBy: auth.currentUser.email
-      };
-
-      db.ref(PATHS.EXPENSES).push(newExpense)
-        .then(() => {
-          document.getElementById('expenseName').value = '';
-          document.getElementById('expenseAmount').value = '';
-          updateExpensesList();
-          generateReport();
-          alert('ההוצאה נשמרה בהצלחה!');
-        })
-        .catch((error) => {
-          console.error('Error submitting expense:', error);
-          alert('שגיאה בשמירת ההוצאה: ' + error.message);
-        })
-        .finally(() => {
-          submitButton.innerHTML = originalText;
-          submitButton.disabled = false;
-        });
-    }
-
-    function updateExpensesList() {
-      const list = document.getElementById('expensesList');
-      const { start, end } = getWeekRange();
-
-      db.ref(PATHS.EXPENSES)
-        .orderByChild('date')
-        .startAt(start.toISOString())
-        .endAt(end.toISOString())
-        .once('value', (snapshot) => {
-          const expenses = [];
-          snapshot.forEach(child => {
-            expenses.push(child.val());
-          });
-
-          if (expenses.length === 0) {
-            list.innerHTML = '<p>אין הוצאות השבוע</p>';
-            return;
-          }
-
-          const grouped = groupByDay(expenses);
-          let html = '';
-
-          Object.keys(grouped).sort().forEach(date => {
-            const dayExpenses = grouped[date];
-            let dayTotal = 0;
-            
-            html += `<h4>${date}</h4><ul>`;
-            dayExpenses.forEach(expense => {
-              dayTotal += expense.amount;
-              html += `<li>${expense.name}: ${expense.amount} ₪</li>`;
-            });
-            html += `<li class="summary">סה"כ ליום: ${dayTotal} ₪</li></ul>`;
-          });
-
-          const weeklyTotal = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-          html += `<div class="summary">סה"כ הוצאות השבוע: ${weeklyTotal} ₪</div>`;
-
-          list.innerHTML = html;
-        });
-    }
-
-    // Set up real-time listeners
-    function setupRealtimeListeners() {
-      // Listen for new orders
-      db.ref(PATHS.ORDERS).on('child_added', () => {
-        generateReport();
-      });
-
-      // Listen for new expenses
-      db.ref(PATHS.EXPENSES).on('child_added', () => {
-        updateExpensesList();
-        generateReport();
-      });
-
-      // Listen for flower type changes
-      db.ref(PATHS.FLOWERS).on('value', () => {
-        updateFlowerTypeList();
-        initializeAutocomplete();
-      });
-
-      // Listen for item changes
-      db.ref(PATHS.ITEMS).on('value', () => {
-        initializeOrderAutocomplete();
-      });
-    }
-
-    function autoResetItems() {
-      const now = new Date();
-      if (now.getDay() === 6 && now.getHours() >= 18) {
-        // Reset items in Firebase instead of localStorage
-        db.ref(PATHS.ITEMS).remove()
-          .then(() => {
-            console.log('Weekly items reset completed');
-          })
-          .catch((error) => {
-            console.error('Error resetting items:', error);
-          });
-      }
-    }
-
-    function getWeekRange() {
-      const now = new Date();
-      const day = now.getDay();
-      const diffToSunday = day;
-      const start = new Date(now);
-      start.setDate(now.getDate() - diffToSunday);
-      start.setHours(0,0,0,0);
-      const end = new Date(start);
-      end.setDate(start.getDate() + 6);
-      end.setHours(23,59,59,999);
-      return { start, end };
-    }
-
-    function groupByDay(items) {
-      const map = {};
-      items.forEach(o => {
-        const d = new Date(o.date || o.orderDate).toLocaleDateString();
-        if (!map[d]) map[d] = [];
-        map[d].push(o);
-      });
-      return map;
-    }
-
-    function generateReport() {
-      const report = document.getElementById('reportOutput');
-      report.innerHTML = '';
-      const { start, end } = getWeekRange();
-
-      // Get both orders and expenses data
-      Promise.all([
-        db.ref(PATHS.ORDERS)
-          .orderByChild('orderDate')
-          .startAt(start.toISOString())
-          .endAt(end.toISOString())
-          .once('value'),
-        db.ref(PATHS.EXPENSES)
-          .orderByChild('date')
-          .startAt(start.toISOString())
-          .endAt(end.toISOString())
-          .once('value')
-      ]).then(([ordersSnapshot, expensesSnapshot]) => {
-        // Convert snapshots to arrays
-        const orders = [];
-        ordersSnapshot.forEach(child => {
-          orders.push(child.val());
-        });
-
-        const expenses = [];
-        expensesSnapshot.forEach(child => {
-          expenses.push(child.val());
-        });
-
-        // Initialize weekly totals
-        const weeklyTotals = {
-          revenue: 0,
-          cost: 0,
-          expenses: 0,
-          profit: 0,
-          flowers: {}
-        };
-
-        // Create table structure
-        const table = document.createElement('table');
-        table.className = 'weekly-report-table';
-        
-        // Add table header
-        const thead = document.createElement('thead');
-        thead.innerHTML = `
-          <tr>
-            <th>ראשון</th>
-            <th>שני</th>
-            <th>שלישי</th>
-            <th>רביעי</th>
-            <th>חמישי</th>
-            <th>שישי</th>
-            <th class="weekly-summary">סיכום שבועי</th>
-          </tr>
-        `;
-        table.appendChild(thead);
-
-        // Create table body with 3 rows (orders, expenses, totals)
-        const tbody = document.createElement('tbody');
-        
-        // Orders row
-        const ordersRow = document.createElement('tr');
-        ordersRow.className = 'orders-row';
-
-        // Expenses row
-        const expensesRow = document.createElement('tr');
-        expensesRow.className = 'expenses-row';
-
-        // Totals row
-        const totalsRow = document.createElement('tr');
-        totalsRow.className = 'totals-row';
-
-        // Process each day
-        for (let i = 0; i < 7; i++) {
-          const currentDate = new Date(start);
-          currentDate.setDate(start.getDate() + i);
-          const dateStr = currentDate.toLocaleDateString();
-          
-          const dayOrders = orders.filter(o => new Date(o.orderDate).toLocaleDateString() === dateStr);
-          const dayExpenses = expenses.filter(e => new Date(e.date).toLocaleDateString() === dateStr);
-
-          let dayRevenue = 0;
-          let dayCost = 0;
-          let dayExpensesTotal = 0;
-          const dayFlowers = {};
-
-          // Process orders
-          let ordersHtml = '';
-          dayOrders.forEach(order => {
-            order.items.forEach(item => {
-              dayRevenue += item.finalPrice;
-              dayCost += item.totalCost || 0;
-              ordersHtml += `<div class="order-item">
-                ${item.name} - ${item.finalPrice} ₪
-              </div>`;
-
-              // Track flowers
-              if (item.ingredients) {
-                item.ingredients.forEach(ing => {
-                  if (!dayFlowers[ing.name]) dayFlowers[ing.name] = 0;
-                  if (!weeklyTotals.flowers[ing.name]) weeklyTotals.flowers[ing.name] = 0;
-                  dayFlowers[ing.name] += ing.qty;
-                  weeklyTotals.flowers[ing.name] += ing.qty;
-                });
-              }
-            });
-          });
-
-          // Process expenses
-          let expensesHtml = '';
-          dayExpenses.forEach(expense => {
-            dayExpensesTotal += expense.amount;
-            expensesHtml += `<div class="expense-item">
-              ${expense.name} - ${expense.amount} ₪
-            </div>`;
-          });
-
-          // Update weekly totals
-          weeklyTotals.revenue += dayRevenue;
-          weeklyTotals.cost += dayCost;
-          weeklyTotals.expenses += dayExpensesTotal;
-          weeklyTotals.profit += (dayRevenue - dayCost - dayExpensesTotal);
-
-          // Create day cells
-          if (i < 6) { // Sunday to Friday
-            // Orders cell
-            const ordersCell = document.createElement('td');
-            ordersCell.innerHTML = ordersHtml || '<div class="no-data">אין הזמנות</div>';
-            ordersRow.appendChild(ordersCell);
-
-            // Expenses cell
-            const expensesCell = document.createElement('td');
-            expensesCell.innerHTML = expensesHtml || '<div class="no-data">אין הוצאות</div>';
-            expensesRow.appendChild(expensesCell);
-
-            // Totals cell
-            const totalsCell = document.createElement('td');
-            totalsCell.innerHTML = `
-              <div class="day-totals">
-                ${Object.entries(dayFlowers).map(([flower, qty]) => 
-                  `<div>${flower}: ${qty}</div>`).join('')}
-                <div class="summary">מכירות: ${dayRevenue} ₪</div>
-                <div class="summary">עלויות: ${dayCost} ₪</div>
-                <div class="summary">הוצאות: ${dayExpensesTotal} ₪</div>
-                <div class="summary">רווח נקי: ${dayRevenue - dayCost - dayExpensesTotal} ₪</div>
-              </div>
-            `;
-            totalsRow.appendChild(totalsCell);
-          }
-        }
-
-        // Add weekly summary column
-        const weeklyOrdersCell = document.createElement('td');
-        weeklyOrdersCell.className = 'weekly-summary';
-        weeklyOrdersCell.rowSpan = 3;
-        weeklyOrdersCell.innerHTML = `
-          <div class="weekly-totals">
-            <h4>סיכום פרחים</h4>
-            ${Object.entries(weeklyTotals.flowers).map(([flower, qty]) => 
-              `<div>${flower}: ${qty}</div>`).join('')}
-            <h4>סיכום כספי</h4>
-            <div class="summary">סה"כ מכירות: ${weeklyTotals.revenue} ₪</div>
-            <div class="summary">סה"כ עלויות: ${weeklyTotals.cost} ₪</div>
-            <div class="summary">סה"כ הוצאות: ${weeklyTotals.expenses} ₪</div>
-            <div class="summary">סה"כ רווח נקי: ${weeklyTotals.profit} ₪</div>
-          </div>
-        `;
-        ordersRow.appendChild(weeklyOrdersCell);
-
-        tbody.appendChild(ordersRow);
-        tbody.appendChild(expensesRow);
-        tbody.appendChild(totalsRow);
-        table.appendChild(tbody);
-        report.appendChild(table);
-      }).catch(error => {
-        console.error('Error generating report:', error);
-        report.innerHTML = '<div class="error">שגיאה בטעינת הדוח</div>';
-      });
-    }
-  </script>
-</body>
-</html>
+      if (confirm(`האם למחוק את הפרח "${type}"?`
