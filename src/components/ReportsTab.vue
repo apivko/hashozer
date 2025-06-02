@@ -39,7 +39,7 @@
         <div class="orders-list">
           <h3>הזמנות</h3>
           <div v-for="order in weeklyOrders" :key="order.id" class="order-item">
-            <div class="order-header">
+            <div class="order-header">  
               <h4>{{ order.customerName }}</h4>
               <span>{{ formatDate(order.createdAt) }}</span>
             </div>
