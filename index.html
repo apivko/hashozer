@@ -526,6 +526,22 @@
       background: #f8d7da;
       border-radius: 50%;
     }
+
+    .report-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+
+    .report-header h2 {
+      margin: 0;
+    }
+
+    .report-header .button-group {
+      margin: 0;
+      padding: 0;
+    }
   </style>
 </head>
 <body>
@@ -613,11 +629,13 @@
       <!-- Reports Tab -->
       <div id="reports" class="tab-content">
         <div class="report-section">
-          <h2>דוח שבועי</h2>
-          <div class="button-group">
-            <button onclick="printReport()" class="print-button">
-              <i class="fas fa-print"></i>
-            </button>
+          <div class="report-header">
+            <h2>דוח שבועי</h2>
+            <div class="button-group">
+              <button onclick="printReport()" class="print-button">
+                <i class="fas fa-print"></i>
+              </button>
+            </div>
           </div>
           <div id="reportOutput"></div>
         </div>
